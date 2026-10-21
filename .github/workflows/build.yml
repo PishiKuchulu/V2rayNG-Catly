@@ -1,21 +1,32 @@
-name: Build APK
+name: Build APK (Debug)
+
+# Adapted from the upstream 2dust/v2rayNG build workflow (tag 2.3.11).
+# Differences from upstream, per the Catly import task:
+#   * Builds the Playstore DEBUG variant instead of a signed Release, so no
+#     personal signing secrets are required or used.
+#   * Runs the unit tests before assembling.
+#   * Uploads the APKs as workflow artifacts only. It never creates or
+#     overwrites a GitHub Release (the upstream sign-and-release job and the
+#     keystore decoding step are removed).
+#   * Workflow permissions are minimal (contents: read).
+# Everything else (recursive submodule checkout, SDK/NDK versions, the HEV
+# native build, and the libv2ray.aar download pinned to the exact tag that
+# `git describe` reports for the checked-out AndroidLibXrayLite gitlink)
+# is preserved from upstream.
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        required: false
-        type: string
   push:
     branches:
       - master
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
     - name: Checkout code
@@ -52,7 +63,7 @@ jobs:
       if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
       run: |
         bash compile-hevtun.sh
-    
+
     - name: Save libhevtun
       if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
@@ -63,12 +74,17 @@ jobs:
     - name: Copy libhevtun
       run: |
         cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+        ls -R ${{ github.workspace }}/V2rayNG/app/libs
 
     - name: Fetch AndroidLibXrayLite tag
       run: |
         pushd AndroidLibXrayLite
         CURRENT_TAG=$(git describe --tags --abbrev=0)
         echo "Current tag in this repo: $CURRENT_TAG"
+        if [ -z "$CURRENT_TAG" ]; then
+          echo "::error::Could not determine the AndroidLibXrayLite tag from the checked-out submodule revision; refusing to download an arbitrary libv2ray.aar release."
+          exit 1
+        fi
         echo "CURRENT_TAG=$CURRENT_TAG" >> $GITHUB_ENV
         popd
 
@@ -80,83 +96,49 @@ jobs:
         fileName: 'libv2ray.aar'
         out-file-path: V2rayNG/app/libs/
 
+    - name: Verify libv2ray.aar
+      run: |
+        if [ ! -s V2rayNG/app/libs/libv2ray.aar ]; then
+          echo "::error::libv2ray.aar was not downloaded for AndroidLibXrayLite tag ${{ env.CURRENT_TAG }}."
+          exit 1
+        fi
+        ls -lh V2rayNG/app/libs/libv2ray.aar
+
     - name: Setup Java
       uses: actions/setup-java@v6.0.1
       with:
         distribution: 'temurin'
         java-version: '21'
 
-    - name: Decode Keystore
-      uses: timheuer/base64-to-file@v2.0.0
-      id: android_keystore
-      with:
-        fileName: "android_keystore.jks"
-        encodedString: ${{ secrets.APP_KEYSTORE_BASE64 }}
-
-    - name: Build APK
+    - name: Run unit tests (Playstore Debug)
       run: |
         cd ${{ github.workspace }}/V2rayNG
         echo "sdk.dir=${ANDROID_HOME}" > local.properties
         chmod 755 gradlew
-        ./gradlew licenseFdroidReleaseReport
-        ./gradlew assembleRelease -Pandroid.injected.signing.store.file=${{ steps.android_keystore.outputs.filePath }} -Pandroid.injected.signing.store.password=${{ secrets.APP_KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.APP_KEYSTORE_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.APP_KEY_PASSWORD }}
-    
-    - name: Upload arm64-v8a APK
-      uses: actions/upload-artifact@v7
-      if: ${{  success() }}
-      with:
-        name: arm64-v8a
-        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*arm64-v8a*.apk
+        ./gradlew testPlaystoreDebugUnitTest --stacktrace
 
-    - name: Upload armeabi-v7a APK
-      uses: actions/upload-artifact@v7
-      if: ${{  success() }}
-      with:
-        name: armeabi-v7a
-        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*armeabi-v7a*.apk
+    - name: Assemble APK (Playstore Debug, no release signing)
+      run: |
+        cd ${{ github.workspace }}/V2rayNG
+        ./gradlew assemblePlaystoreDebug --stacktrace
 
-    - name: Upload x86 APK
-      uses: actions/upload-artifact@v7
-      if: ${{  success() }}
-      with:
-        name: x86-apk
-        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*x86*.apk
-
-    - name: Upload universal APK
+    - name: Upload Debug APKs
       uses: actions/upload-artifact@v7
       if: ${{ success() }}
       with:
-        name: universal-apk
-        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*universal*.apk
+        name: v2rayNG-playstore-debug-apks
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/playstore/debug/*.apk
+        if-no-files-found: error
+        retention-days: 90
 
-  sign-and-release:
-    needs: build
-    runs-on: ubuntu-26.04
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
-
-    steps:
-      - name: Download APK artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: release
-
-      - name: Sign APK files
-        run: |
-          printf '%s' "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          KEY=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')
-          mkdir -p release-files
-
-          find release -type f -name '*.apk' | while read apk; do
-            cp "$apk" release-files/
-            gpg --batch --yes --local-user "$KEY" --detach-sign --output "release-files/$(basename "$apk").sig" "$apk"
-          done
-
-          gpg --armor --export "$KEY" > release-files/v2rayN-public-key.asc
-
-      - name: Upload APKs, signatures and public key to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          file: release-files/*
-          tag: ${{ inputs.release_tag }}
-          file_glob: true
-          prerelease: true
+    - name: Upload Gradle reports on failure
+      uses: actions/upload-artifact@v7
+      if: ${{ failure() }}
+      with:
+        name: gradle-reports
+        path: |
+          ${{ github.workspace }}/V2rayNG/app/build/reports/
+          ${{ github.workspace }}/V2rayNG/app/build/test-results/
+          ${{ github.workspace }}/V2rayNG/build/reports/
+        if-no-files-found: ignore
+        retention-days: 30
