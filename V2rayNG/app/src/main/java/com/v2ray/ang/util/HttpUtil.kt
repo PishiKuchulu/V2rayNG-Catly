@@ -125,7 +125,19 @@ object HttpUtil {
                     LogUtil.w(AppConfig.TAG, "Failed to get URL content, code=${response.code}")
                     return null
                 }
-                return response.body?.string()
+                val body = response.body ?: return null
+                if (request.maxBytes > 0) {
+                    // Bounded read for untrusted third-party responses (for example IP geolocation).
+                    if (body.contentLength() > request.maxBytes) return null
+                    val source = body.source()
+                    source.request(request.maxBytes + 1)
+                    if (source.buffer.size > request.maxBytes) {
+                        LogUtil.w(AppConfig.TAG, "Response larger than ${request.maxBytes} bytes was rejected")
+                        return null
+                    }
+                    return source.buffer.readString(Charsets.UTF_8)
+                }
+                return body.string()
             }
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to get URL content", e)

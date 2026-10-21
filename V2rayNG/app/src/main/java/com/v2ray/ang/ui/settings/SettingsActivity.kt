@@ -51,6 +51,7 @@ import com.v2ray.ang.ui.compose.SettingsMenuItem
 import com.v2ray.ang.ui.compose.SettingsSwitchItem
 import com.v2ray.ang.ui.compose.ThemeManager
 import com.v2ray.ang.ui.compose.verticalScrollbar
+import com.v2ray.ang.ui.location.CustomLocationActivity
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.launch
@@ -89,7 +90,8 @@ class SettingsActivity : BaseComponentActivity() {
             viewModel = viewModel,
             onBackClick = { finish() },
             onModeHelpClicked = { Utils.openUri(this, AppConfig.APP_WIKI_MODE) },
-            onSystemVpnSettingsClicked = ::openSystemVpnSettings
+            onSystemVpnSettingsClicked = ::openSystemVpnSettings,
+            onCustomLocationClicked = { startActivity(Intent(this, CustomLocationActivity::class.java)) }
         )
     }
 }
@@ -100,12 +102,14 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBackClick: () -> Unit,
     onModeHelpClicked: () -> Unit,
-    onSystemVpnSettingsClicked: () -> Unit
+    onSystemVpnSettingsClicked: () -> Unit,
+    onCustomLocationClicked: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val systemVpnSettingsAvailable by viewModel.systemVpnSettingsAvailable.collectAsStateWithLifecycle()
     var uiSettingsExpanded by rememberSaveable { mutableStateOf(true) }
+    var customLocationExpanded by rememberSaveable { mutableStateOf(true) }
     var vpnSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var coreSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var muxSettingsExpanded by rememberSaveable { mutableStateOf(false) }
@@ -300,6 +304,19 @@ fun SettingsScreen(
                         uiModeNight = it
                         ThemeManager.setThemeMode(it)
                     }
+                )
+            }
+
+            CollapsiblePreferenceGroupHeader(
+                title = stringResource(R.string.cl_title),
+                expanded = customLocationExpanded,
+                onExpandedChange = { customLocationExpanded = it }
+            )
+            if (customLocationExpanded) {
+                SettingsMenuItem(
+                    title = stringResource(R.string.cl_title),
+                    subtitle = stringResource(R.string.cl_settings_summary),
+                    onClick = onCustomLocationClicked
                 )
             }
 

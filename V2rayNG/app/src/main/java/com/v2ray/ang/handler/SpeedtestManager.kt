@@ -3,6 +3,7 @@ package com.v2ray.ang.handler
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.IPAPIInfo
 import com.v2ray.ang.dto.UrlContentRequest
+import com.v2ray.ang.handler.location.GeoIpResponseParser
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -16,7 +17,17 @@ object SpeedtestManager {
     data class RemoteEndpointInfo(
         val country: String?,
         val ipAddress: String?,
+        /** ISO 3166-1 alpha-2 when the provider's answer could be mapped to one; `country` is unchanged. */
+        val countryCode: String? = null,
+        val regionCode: String? = null,
+        val regionName: String? = null,
+        val city: String? = null,
+        val latitude: Double? = null,
+        val longitude: Double? = null,
     )
+
+    /** Upper bound for an IP-geolocation response body; real answers are well under 2 KB. */
+    private const val MAX_IP_INFO_BYTES = 64L * 1024
 
     /**
      * Measures the time taken to establish a TCP connection to a given URL and port.
@@ -67,7 +78,8 @@ object SpeedtestManager {
                 timeout = 5000,
                 httpPort = httpPort,
                 proxyUsername = proxyUsername,
-                proxyPassword = proxyPassword
+                proxyPassword = proxyPassword,
+                maxBytes = MAX_IP_INFO_BYTES
             )
         ) ?: return null
         val ipInfo = JsonUtil.fromJsonSafe(content, IPAPIInfo::class.java) ?: return null
@@ -86,9 +98,17 @@ object SpeedtestManager {
             ipInfo.location?.country_code
         ).firstOrNull { !it.isNullOrBlank() }
 
+        // Region/city/coordinates come from the same single response; no second provider is queried.
+        val geo = GeoIpResponseParser.parse(content)
         return RemoteEndpointInfo(
             country = country,
             ipAddress = ip,
+            countryCode = geo?.countryCode,
+            regionCode = geo?.regionCodeRaw,
+            regionName = geo?.regionName,
+            city = geo?.city,
+            latitude = geo?.latitude,
+            longitude = geo?.longitude,
         )
     }
 }

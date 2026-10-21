@@ -7,5 +7,7 @@ data class UrlContentRequest(
     val proxyUsername: String? = null,
     val proxyPassword: String? = null,
     val userAgent: String? = null,
-    val requestHeaders: String? = null
+    val requestHeaders: String? = null,
+    /** Reject responses larger than this many bytes. 0 keeps the previous unbounded behavior. */
+    val maxBytes: Long = 0L
 )

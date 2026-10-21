@@ -351,6 +351,12 @@ object CoreServiceManager {
                 errorMessage = errorStr,
                 country = endpoint?.country,
                 ipAddress = endpoint?.ipAddress,
+                countryCode = endpoint?.countryCode,
+                regionCode = endpoint?.regionCode,
+                regionName = endpoint?.regionName,
+                city = endpoint?.city,
+                latitude = endpoint?.latitude,
+                longitude = endpoint?.longitude,
             )
             withContext(Dispatchers.Main.immediate) {
                 if (isRunning()) {

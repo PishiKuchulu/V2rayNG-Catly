@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Debug builds only. Android lists an app in Developer options > "Select mock location app"
+        only if it declares this permission, and lint rejects it in release manifests. Release builds
+        therefore cannot deliver mock locations; Custom Location reports that state instead of
+        pretending. See docs/CUSTOM_LOCATION.md.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
+</manifest>
